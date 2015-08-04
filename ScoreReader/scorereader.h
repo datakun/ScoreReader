@@ -40,7 +40,7 @@ private:
     void removeLines(cv::Mat inMat);
 
     // 가로선 제거된 이미지에서 객체 찾기
-    void findObjects(cv::Mat inMat);
+    cv::Mat findObjects(cv::Mat inMat);
 
     // 가로선 제거된 이미지에서 마디 찾기
     void findBar(cv::Mat inMat);

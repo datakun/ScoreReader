@@ -56,9 +56,9 @@ ScoreReader::ScoreReader(QWidget *parent)
 
         //setDisplayResultImage(resultMat);
 
-        findObjects(resultMat);
+        cv::Mat outMat = findObjects(resultMat);
 
-        setDisplayResultImage(resultMat);
+        setDisplayResultImage(outMat);
     });
 }
 
@@ -95,33 +95,30 @@ void ScoreReader::findBar(cv::Mat inMat)
     m_scoreKey = "C";
 }
 
-void ScoreReader::findObjects(cv::Mat inMat)
+cv::Mat ScoreReader::findObjects(cv::Mat inMat)
 {
-    //qDebug() << cv::connectedComponentsWithStats(coppied, inMat, inMat, inMat, 8);
+    bitwise_not(inMat, inMat);
 
     cv::Mat labelImage(inMat.size(), CV_32S);
 
     int nLabels = connectedComponents(inMat, labelImage, 8);
     cv::Vec3b *colors = new cv::Vec3b[nLabels];
-    colors[0] = cv::Vec3b(0, 0, 0);//background
+    colors[0] = cv::Vec3b(0, 0, 0); // 배경색
 
     for (int label = 1; label < nLabels; ++label){
         colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
     }
 
     cv::Mat dst(inMat.size(), CV_8UC3);
-    for (int r = 0; r < dst.rows; ++r){
-        for (int c = 0; c < dst.cols; ++c){
-            int label = labelImage.at<int>(r, c);
-            cv::Vec3b &pixel = dst.at<cv::Vec3b>(r, c);
+    for (int i = 0; i < dst.rows; ++i){
+        for (int j = 0; j < dst.cols; ++j){
+            int label = labelImage.at<int>(i, j);
+            cv::Vec3b &pixel = dst.at<cv::Vec3b>(i, j);
             pixel = colors[label];
-
-            // TODO: 특정 픽셀 색 변경
-            //inMat.at<cv::Vec3b>(cv::Point(r, c)) = pixel;
         }
     }
 
-    //coppied.copyTo(inMat);
+    return dst;
 }
 
 void ScoreReader::findLineByHough(cv::Mat inMat)
@@ -232,7 +229,7 @@ cv::Mat ScoreReader::QImageToCvMat(const QImage &inImage, bool inCloneImageData)
         if (!inCloneImageData)
             qWarning() << "ASM::QImageToCvMat() - Conversion requires cloning since we use a temporary QImage";
 
-        QImage   swapped = inImage.rgbSwapped();
+        QImage swapped = inImage.rgbSwapped();
 
         return cv::Mat(swapped.height(), swapped.width(), CV_8UC3, const_cast<uchar*>(swapped.bits()), swapped.bytesPerLine()).clone();
     }
