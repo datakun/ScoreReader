@@ -15,7 +15,7 @@
 #endif
 
 ScoreReader::ScoreReader(QWidget *parent)
-    : QMainWindow(parent), m_fileDialog(NULL), m_scoreImage(NULL)
+    : QMainWindow(parent), m_fileDialog(NULL), m_scoreImage(NULL), m_resultImage(NULL), m_scoreLineImage(NULL)
 {
     ui.setupUi(this);
 
@@ -39,10 +39,8 @@ ScoreReader::ScoreReader(QWidget *parent)
         if (srcMat.empty())
             return;
 
-        // TODO: 이미지 처리후 GRAY2BGR 필요
-        cv::Mat resultMat;
-        cv::cvtColor(srcMat, resultMat, CV_BGR2GRAY);
-        cv::threshold(resultMat, resultMat, 128, 255, CV_THRESH_BINARY_INV);
+        cv::cvtColor(srcMat, srcMat, CV_BGR2GRAY);
+        cv::threshold(srcMat, srcMat, 128, 255, CV_THRESH_BINARY_INV);
 
         //// 세선화
         //thinning(resultMat);
@@ -52,11 +50,16 @@ ScoreReader::ScoreReader(QWidget *parent)
         //// 허프변환으로 선 찾기
         ////findLineByHough(resultMat);
 
-        removeLines(resultMat);
+        cv::Mat lineMat = findLines(srcMat);
+        releaseImage(m_scoreLineImage);
+        m_scoreLineImage = new QImage(cvMatToQImage(lineMat));
+        cv::Mat resultMat = removeLines(srcMat, lineMat);
 
         //setDisplayResultImage(resultMat);
 
         cv::Mat outMat = findObjects(resultMat);
+        releaseImage(m_resultImage);
+        m_resultImage = new QImage(cvMatToQImage(outMat));
 
         setDisplayResultImage(outMat);
     });
@@ -64,9 +67,26 @@ ScoreReader::ScoreReader(QWidget *parent)
 
 ScoreReader::~ScoreReader()
 {
+    releaseImage(m_scoreImage);
+    releaseImage(m_scoreLineImage);
+    releaseImage(m_resultImage);
 }
 
-void ScoreReader::removeLines(cv::Mat inMat)
+void ScoreReader::releaseImage(QImage *image)
+{
+    if (image)
+        delete image;
+    image = NULL;
+}
+
+void ScoreReader::releaseImage(QPixmap *pixmap)
+{
+    if (pixmap)
+        delete pixmap;
+    pixmap = NULL;
+}
+
+cv::Mat ScoreReader::findLines(cv::Mat inMat)
 {
     cv::Mat horizontal = inMat.clone();
 
@@ -77,16 +97,21 @@ void ScoreReader::removeLines(cv::Mat inMat)
     cv::erode(horizontal, horizontal, horizontalStructure, cv::Point(-1, -1));
     cv::dilate(horizontal, horizontal, horizontalStructure, cv::Point(-1, -1));
 
-    cv::absdiff(inMat, horizontal, horizontal);
+    return horizontal;
+}
+
+cv::Mat ScoreReader::removeLines(cv::Mat inMat, cv::Mat lineMat)
+{
+    cv::absdiff(inMat, lineMat, lineMat);
 
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 2));
 
-    cv::dilate(horizontal, horizontal, kernel, cv::Point(-1, -1));
-    cv::erode(horizontal, horizontal, kernel, cv::Point(-1, -1));
+    cv::dilate(lineMat, lineMat, kernel, cv::Point(-1, -1));
+    cv::erode(lineMat, lineMat, kernel, cv::Point(-1, -1));
 
-    //horizontal.copyTo(inMat);
+    bitwise_not(lineMat, inMat);
 
-    bitwise_not(horizontal, inMat);
+    return inMat.clone();
 }
 
 void ScoreReader::findBar(cv::Mat inMat)
@@ -102,23 +127,36 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat)
     cv::Mat labelImage(inMat.size(), CV_32S);
 
     int nLabels = connectedComponents(inMat, labelImage, 8);
+    cv::Mat labelStats(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
+    cv::Mat centroids;
+    connectedComponentsWithStats(inMat, labelImage, labelStats, centroids, 8);
+
     cv::Vec3b *colors = new cv::Vec3b[nLabels];
     colors[0] = cv::Vec3b(0, 0, 0); // 배경색
 
     for (int label = 1; label < nLabels; ++label){
-        colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
+
+        if (labelStats.at<int>(label, cv::CC_STAT_AREA) <= NOISE_SIZE)
+        {
+            colors[label] = colors[0]; // 배경색
+        }
+        else
+        {
+            colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
+            //colors[label] = cv::Vec3b(255, 0, label);
+        }
     }
 
-    cv::Mat dst(inMat.size(), CV_8UC3);
-    for (int i = 0; i < dst.rows; ++i){
-        for (int j = 0; j < dst.cols; ++j){
+    cv::Mat outMat(inMat.size(), CV_8UC3);
+    for (int i = 0; i < outMat.rows; ++i){
+        for (int j = 0; j < outMat.cols; ++j){
             int label = labelImage.at<int>(i, j);
-            cv::Vec3b &pixel = dst.at<cv::Vec3b>(i, j);
+            cv::Vec3b &pixel = outMat.at<cv::Vec3b>(i, j);
             pixel = colors[label];
         }
     }
 
-    return dst;
+    return outMat;
 }
 
 void ScoreReader::findLineByHough(cv::Mat inMat)

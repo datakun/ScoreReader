@@ -15,6 +15,8 @@
 
 #define PI 3.1415926
 
+#define NOISE_SIZE 10
+
 class ScoreReader : public QMainWindow
 {
     Q_OBJECT
@@ -37,7 +39,8 @@ private:
     void findLineByHough(cv::Mat inMat);
 
     // 침식 팽창으로 가로선을 찾은 뒤, 원본 이미지에서 가로선 제거
-    void removeLines(cv::Mat inMat);
+    cv::Mat findLines(cv::Mat inMat);
+    cv::Mat removeLines(cv::Mat inMat, cv::Mat lineMat);
 
     // 가로선 제거된 이미지에서 객체 찾기
     cv::Mat findObjects(cv::Mat inMat);
@@ -50,6 +53,9 @@ private:
     void setDisplayResultImage(const QImage image);
     void setDisplayResultImage(const cv::Mat& inMat);
 
+    void releaseImage(QImage *image);
+    void releaseImage(QPixmap *pixmap);
+
 private:
     Ui::ScoreReaderClass ui;
 
@@ -57,6 +63,8 @@ private:
 
     QString m_fileName;
     QImage* m_scoreImage;
+    QImage* m_scoreLineImage;
+    QImage* m_resultImage;
 
     int m_scoreBar;
     QString m_scoreBeat;
