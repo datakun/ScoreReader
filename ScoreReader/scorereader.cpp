@@ -35,6 +35,9 @@ ScoreReader::ScoreReader(QWidget *parent)
         }
     });
     connect(ui.actionFineLine, &QAction::triggered, [=]{
+        if (m_scoreImage == NULL)
+            return;
+
         cv::Mat srcMat = QImageToCvMat(m_scoreImage->convertToFormat(QImage::Format_RGB32));
         if (srcMat.empty())
             return;
@@ -50,16 +53,22 @@ ScoreReader::ScoreReader(QWidget *parent)
         //// 허프변환으로 선 찾기
         ////findLineByHough(resultMat);
 
-        cv::Mat lineMat = findLines(srcMat);
+        // 오선 찾은 뒤 지우기
+        cv::Mat labeledLine;
+        cv::Mat labeledLineStats;
+        cv::Mat lineMat = findLines(srcMat, labeledLine, labeledLineStats);
         releaseImage(m_scoreLineImage);
         m_scoreLineImage = new QImage(cvMatToQImage(lineMat));
         cv::Mat resultMat = removeLines(srcMat, lineMat);
 
-        //setDisplayResultImage(resultMat);
-
-        cv::Mat outMat = findObjects(resultMat);
+        // 오선 지워진 영상에서 객체 라벨링
+        cv::Mat labeledImage;
+        cv::Mat labeledImageStats;
+        cv::Mat outMat = findObjects(resultMat, labeledImage, labeledImageStats);
         releaseImage(m_resultImage);
         m_resultImage = new QImage(cvMatToQImage(outMat));
+
+
 
         setDisplayResultImage(outMat);
     });
@@ -86,7 +95,7 @@ void ScoreReader::releaseImage(QPixmap *pixmap)
     pixmap = NULL;
 }
 
-cv::Mat ScoreReader::findLines(cv::Mat inMat)
+cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats)
 {
     cv::Mat horizontal = inMat.clone();
 
@@ -97,19 +106,37 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat)
     cv::erode(horizontal, horizontal, horizontalStructure, cv::Point(-1, -1));
     cv::dilate(horizontal, horizontal, horizontalStructure, cv::Point(-1, -1));
 
+    outLabeledMat.create(inMat.size(), CV_32S);
+
+    int nLabels = connectedComponents(horizontal, outLabeledMat, 8);
+    outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
+    cv::Mat centroids;
+    connectedComponentsWithStats(horizontal, outLabeledMat, outLabelStats, centroids, 8);
+
+    for (int i = 0; i < outLabeledMat.rows; ++i)
+    {
+        for (int j = 0; j < outLabeledMat.cols; ++j)
+        {
+            int label = outLabeledMat.at<int>(i, j);
+
+            if (outLabelStats.at<int>(label, cv::CC_STAT_WIDTH) <= horizontal.cols / 2)
+                horizontal.at<uchar>(i, j) = 0;
+        }
+    }
+
     return horizontal;
 }
 
 cv::Mat ScoreReader::removeLines(cv::Mat inMat, cv::Mat lineMat)
 {
-    cv::absdiff(inMat, lineMat, lineMat);
+    cv::absdiff(inMat, lineMat, inMat);
 
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 2));
 
-    cv::dilate(lineMat, lineMat, kernel, cv::Point(-1, -1));
-    cv::erode(lineMat, lineMat, kernel, cv::Point(-1, -1));
+    cv::dilate(inMat, inMat, kernel, cv::Point(-1, -1));
+    cv::erode(inMat, inMat, kernel, cv::Point(-1, -1));
 
-    bitwise_not(lineMat, inMat);
+    bitwise_not(inMat, inMat);
 
     return inMat.clone();
 }
@@ -120,37 +147,40 @@ void ScoreReader::findBar(cv::Mat inMat)
     m_scoreKey = "C";
 }
 
-cv::Mat ScoreReader::findObjects(cv::Mat inMat)
+cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats)
 {
     bitwise_not(inMat, inMat);
 
-    cv::Mat labelImage(inMat.size(), CV_32S);
+    outLabeledMat.create(inMat.size(), CV_32S);
 
-    int nLabels = connectedComponents(inMat, labelImage, 8);
-    cv::Mat labelStats(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
+    int nLabels = connectedComponents(inMat, outLabeledMat, 8);
+    outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
     cv::Mat centroids;
-    connectedComponentsWithStats(inMat, labelImage, labelStats, centroids, 8);
+    connectedComponentsWithStats(inMat, outLabeledMat, outLabelStats, centroids, 8);
 
     cv::Vec3b *colors = new cv::Vec3b[nLabels];
     colors[0] = cv::Vec3b(0, 0, 0); // 배경색
 
-    for (int label = 1; label < nLabels; ++label){
-
-        if (labelStats.at<int>(label, cv::CC_STAT_AREA) <= NOISE_SIZE)
+    for (int label = 1; label < nLabels; ++label)
+    {
+        if (outLabelStats.at<int>(label, cv::CC_STAT_AREA) <= NOISE_SIZE)
         {
             colors[label] = colors[0]; // 배경색
         }
         else
         {
+            //qDebug() << label << outLabelStats.at<int>(label, cv::CC_STAT_LEFT) << ", " << outLabelStats.at<int>(label, cv::CC_STAT_TOP) << " : " << centroids.at<double>(label, 0) << ", " << centroids.at<double>(label, 1) << outLabelStats.at<int>(label, cv::CC_STAT_WIDTH) << outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
             colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
             //colors[label] = cv::Vec3b(255, 0, label);
         }
     }
 
     cv::Mat outMat(inMat.size(), CV_8UC3);
-    for (int i = 0; i < outMat.rows; ++i){
-        for (int j = 0; j < outMat.cols; ++j){
-            int label = labelImage.at<int>(i, j);
+    for (int i = 0; i < outMat.rows; ++i)
+    {
+        for (int j = 0; j < outMat.cols; ++j)
+        {
+            int label = outLabeledMat.at<int>(i, j);
             cv::Vec3b &pixel = outMat.at<cv::Vec3b>(i, j);
             pixel = colors[label];
         }

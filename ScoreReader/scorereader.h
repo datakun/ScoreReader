@@ -39,11 +39,14 @@ private:
     void findLineByHough(cv::Mat inMat);
 
     // 침식 팽창으로 가로선을 찾은 뒤, 원본 이미지에서 가로선 제거
-    cv::Mat findLines(cv::Mat inMat);
+    cv::Mat findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
     cv::Mat removeLines(cv::Mat inMat, cv::Mat lineMat);
 
     // 가로선 제거된 이미지에서 객체 찾기
-    cv::Mat findObjects(cv::Mat inMat);
+    // @param inMat the source image
+    // @param outLabeledMat destination labeled image
+    // @param outLabelStats destination labeled image statistics
+    cv::Mat findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
 
     // 가로선 제거된 이미지에서 마디 찾기
     void findBar(cv::Mat inMat);
