@@ -72,7 +72,7 @@ ScoreReader::ScoreReader(QWidget *parent)
 
 
 
-        setDisplayResultImage(outMat);
+        setDisplayResultImage(lineMat);
     });
 }
 
@@ -137,12 +137,73 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
 
     for (int label = 1; label < nLabels; ++label)
     {
-        int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
-        int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
-        int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+        //int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+        //int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+        int objTop = outLabelStats.at<int>(label, cv::CC_STAT_TOP);
         cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
 
+        //qDebug() << "Label :" << label << " " << outLabelStats.at<int>(label, cv::CC_STAT_TOP);
+
         // 오선 영역 찾기
+        // x : label number, y : distance
+        QList<QPoint> siblingLineCandidates;
+
+        for (int x = 1; x < nLabels; x++)
+        {
+            if (x == label)
+                continue;
+
+            int xTop = outLabelStats.at<int>(x, cv::CC_STAT_TOP);
+
+            if (siblingLineCandidates.size() < 5)
+            {
+                siblingLineCandidates.push_back(QPoint(x, abs(objTop - xTop)));
+            }
+            else
+            {
+                int indexOfFar = 0;
+                int distance = 0;
+
+                for (int i = 0; i < siblingLineCandidates.size(); i++)
+                {
+                    int itemTop = outLabelStats.at<int>(siblingLineCandidates[i].x(), cv::CC_STAT_TOP);
+
+                    if (abs(objTop - itemTop) > distance)
+                    {
+                        distance = abs(objTop - itemTop);
+                        indexOfFar = i;
+                    }
+                }
+
+                if (distance > abs(objTop - xTop))
+                    siblingLineCandidates[indexOfFar] = QPoint(x, abs(objTop - xTop));
+            }
+        }
+
+        QRect lineArea(inMat.cols, inMat.rows, 0, 0);
+
+        for (auto item : siblingLineCandidates)
+        {
+            int itemTop = outLabelStats.at<int>(item.x(), cv::CC_STAT_TOP);
+            int itemLeft = outLabelStats.at<int>(item.x(), cv::CC_STAT_LEFT);
+            int itemBottom = outLabelStats.at<int>(item.x(), cv::CC_STAT_TOP) + outLabelStats.at<int>(item.x(), cv::CC_STAT_HEIGHT);
+            int itemRight = outLabelStats.at<int>(item.x(), cv::CC_STAT_LEFT) + outLabelStats.at<int>(item.x(), cv::CC_STAT_WIDTH);
+
+            if (lineArea.top() > itemTop)
+                lineArea.setTop(itemTop);
+
+            if (lineArea.left() > itemLeft)
+                lineArea.setLeft(itemLeft);
+
+            if (lineArea.right() > itemRight)
+                lineArea.setRight(itemRight);
+
+            if (lineArea.bottom() > itemBottom)
+                lineArea.setBottom(itemBottom);
+        }
+
+        // TODO Top 위치가 이상하게 나옴
+        qDebug() << "Label : " << label << lineArea.top() << lineArea.left() << lineArea.bottom() << lineArea.right();
 
         // 1, 2, 3, 4, 5 번째 줄의 y 위치 찾기
     }
