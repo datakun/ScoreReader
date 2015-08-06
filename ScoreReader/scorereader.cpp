@@ -7,11 +7,13 @@
 #pragma comment(lib, "opencv_highgui300d.lib")
 #pragma comment(lib, "opencv_imgproc300d.lib")
 #pragma comment(lib, "opencv_imgcodecs300d.lib")
+#pragma comment(lib, "opencv_ml300d.lib")
 #else
 #pragma comment(lib, "opencv_core300.lib")  
 #pragma comment(lib, "opencv_highgui300.lib")
 #pragma comment(lib, "opencv_imgproc300.lib")
 #pragma comment(lib, "opencv_imgcodecs300.lib")
+#pragma comment(lib, "opencv_ml300.lib")
 #endif
 
 ScoreReader::ScoreReader(QWidget *parent)
@@ -97,6 +99,7 @@ void ScoreReader::releaseImage(QPixmap *pixmap)
 
 cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats)
 {
+    // 가로가 긴 마스크로 침식 팽창을 하여 오선 후보 찾음
     cv::Mat horizontal = inMat.clone();
 
     int horizontalsize = horizontal.cols / 30;
@@ -108,20 +111,40 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
 
     outLabeledMat.create(inMat.size(), CV_32S);
 
+    // 잡음을 제거하기 위한 라벨링
     int nLabels = connectedComponents(horizontal, outLabeledMat, 8);
     outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
     cv::Mat centroids;
     connectedComponentsWithStats(horizontal, outLabeledMat, outLabelStats, centroids, 8);
 
+    // 잡음 제거
     for (int i = 0; i < outLabeledMat.rows; ++i)
     {
         for (int j = 0; j < outLabeledMat.cols; ++j)
         {
             int label = outLabeledMat.at<int>(i, j);
 
+            // 객체(선)의 길이가 영상의 (가로 너비) / 2 보다 작다면 잡음으로 인식
             if (outLabelStats.at<int>(label, cv::CC_STAT_WIDTH) <= horizontal.cols / 2)
                 horizontal.at<uchar>(i, j) = 0;
         }
+    }
+
+    // 잡음이 제거 된 영상에서 다시 라벨링
+    nLabels = connectedComponents(horizontal, outLabeledMat, 8);
+    outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
+    connectedComponentsWithStats(horizontal, outLabeledMat, outLabelStats, centroids, 8);
+
+    for (int label = 1; label < nLabels; ++label)
+    {
+        int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+        int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+        int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+        cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
+
+        // 오선 영역 찾기
+
+        // 1, 2, 3, 4, 5 번째 줄의 y 위치 찾기
     }
 
     return horizontal;
@@ -153,27 +176,37 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
 
     outLabeledMat.create(inMat.size(), CV_32S);
 
+    // 잡음을 제거하기 위한 라벨링
     int nLabels = connectedComponents(inMat, outLabeledMat, 8);
     outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
     cv::Mat centroids;
+    connectedComponentsWithStats(inMat, outLabeledMat, outLabelStats, centroids, 8);
+
+    for (int i = 0; i < outLabeledMat.rows; ++i)
+    {
+        for (int j = 0; j < outLabeledMat.cols; ++j)
+        {
+            int label = outLabeledMat.at<int>(i, j);
+
+            int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+            int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+            int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+
+            if (objArea <= NOISE_SIZE || objWidth > objHeight * 2)
+                inMat.at<uchar>(i, j) = 0;
+        }
+    }
+
+    // 잡음이 제거 된 영상에서 다시 라벨링
+    nLabels = connectedComponents(inMat, outLabeledMat, 8);
+    outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
     connectedComponentsWithStats(inMat, outLabeledMat, outLabelStats, centroids, 8);
 
     cv::Vec3b *colors = new cv::Vec3b[nLabels];
     colors[0] = cv::Vec3b(0, 0, 0); // 배경색
 
     for (int label = 1; label < nLabels; ++label)
-    {
-        if (outLabelStats.at<int>(label, cv::CC_STAT_AREA) <= NOISE_SIZE)
-        {
-            colors[label] = colors[0]; // 배경색
-        }
-        else
-        {
-            //qDebug() << label << outLabelStats.at<int>(label, cv::CC_STAT_LEFT) << ", " << outLabelStats.at<int>(label, cv::CC_STAT_TOP) << " : " << centroids.at<double>(label, 0) << ", " << centroids.at<double>(label, 1) << outLabelStats.at<int>(label, cv::CC_STAT_WIDTH) << outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
-            colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
-            //colors[label] = cv::Vec3b(255, 0, label);
-        }
-    }
+        colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
 
     cv::Mat outMat(inMat.size(), CV_8UC3);
     for (int i = 0; i < outMat.rows; ++i)
@@ -187,6 +220,75 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
     }
 
     return outMat;
+}
+
+void ScoreReader::KNN()
+{
+    //cv::RNG rng;
+
+    //IplImage *img = cvCreateImage(cvSize(1000, 1000), IPL_DEPTH_8U, 3);
+    //cvZero(img);
+
+    //cvNamedWindow("result", CV_WINDOW_AUTOSIZE);
+
+    //// 학습 데이터의 총 수를 카운트 한다.
+    //int sample_count = 0;
+    //for (int i = 0; i<MAX_CLASS; i++) sample_count += sample_param[i].no_sample;
+
+    //// 학습 데이터와 클래스를 할당할 행렬 생성
+    //CvMat *train_data = cvCreateMat(sample_count, 2, CV_32FC1);
+    //CvMat *train_class = cvCreateMat(sample_count, 1, CV_32SC1);
+
+    //// 각 클래스 별로 정규분포를 가지는 학습 데이터를 무작위로 생성
+    //for (int i = 0, k = 0; i<MAX_CLASS; i++){
+    //    for (int j = 0; j<sample_param[i].no_sample; j++){
+    //        CV_MAT_ELEM(*train_data, float, k, 0) = (float)(sample_param[i].mean_x + rng.gaussian(sample_param[i].stdev_x));
+    //        CV_MAT_ELEM(*train_data, float, k, 1) = (float)(sample_param[i].mean_y + rng.gaussian(sample_param[i].stdev_y));
+    //        CV_MAT_ELEM(*train_class, long, k, 0) = i;
+    //        k++;
+    //    }
+    //}
+
+    //// learn classifier
+    //CvKNearest knn(train_data, train_class, 0, false, MAX_K);
+
+    //CvMat *nearests = cvCreateMat(1, MAX_K, CV_32FC1);
+
+    //// KNN 분류기가 이미지의 모든 픽셀에 대해 각 픽셀이 
+    //// 어느 클래스에 속하는지 추정하여 클래스를 할당한다.
+    //for (int x = 0; x<img->width; x++) {
+    //    for (int y = 0; y<img->height; y++) {
+    //        float sample_[2] = { (float)x, (float)y };
+    //        CvMat sample = cvMat(1, 2, CV_32FC1, sample_);
+
+    //        // KNN 분류기가 주어진 픽셀이 어느 클래스에 속하는지 추정한다.
+    //        float response = knn.find_nearest(&sample, MAX_K, 0, 0, nearests, 0);
+
+    //        // 이미지에 추정된 클래스를 색으로 표시한다.
+    //        cvSet2D(img, y, x, sample_param[cvRound(response)].color_pt);
+    //    }
+    //}
+
+    //// 학습 데이터를 이미지에 그린다.
+    //for (int k = 0; k<sample_count; k++) {
+    //    int x = cvRound(CV_MAT_ELEM(*train_data, float, k, 0));
+    //    int y = cvRound(CV_MAT_ELEM(*train_data, float, k, 1));
+    //    int c = cvRound(CV_MAT_ELEM(*train_class, long, k, 0));
+
+    //    cvCircle(img, cvPoint(x, y), 2, sample_param[c].color_bg, CV_FILLED);
+    //}
+
+    //cvShowImage("result", img);
+
+    //// 키를 누르면 종료
+    //cvWaitKey(0);
+
+    //cvReleaseMat(&train_class);
+    //cvReleaseMat(&train_data);
+    //cvReleaseMat(&nearests);
+
+    //cvDestroyWindow("result");
+    //cvReleaseImage(&img);
 }
 
 void ScoreReader::findLineByHough(cv::Mat inMat)

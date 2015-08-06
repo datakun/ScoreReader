@@ -7,6 +7,7 @@
 
 #include "ui_scorereader.h"
 
+#include <opencv/ml.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -16,6 +17,27 @@
 #define PI 3.1415926
 
 #define NOISE_SIZE 10
+
+static const int MAX_K = 10;
+static const int MAX_CLASS = 3;	// 클래스 수
+
+static struct sSampleParam {
+    int no_sample;				// 셈플 데이터의 수
+    double mean_x, mean_y;		// x, y의 평균
+    double stdev_x, stdev_y;	// x, y의 표준 편차
+    CvScalar color_pt;			// 셈플 색
+    CvScalar color_bg;			// 배경 색
+} sample_param[MAX_CLASS] = {
+    { 500, 500, 200, 60, 30, CV_RGB(180, 0, 0), CV_RGB(255, 0, 0), },
+    { 1500, 200, 500, 100, 80, CV_RGB(0, 180, 0), CV_RGB(0, 255, 0), },
+    { 1000, 400, 700, 60, 100, CV_RGB(0, 0, 180), CV_RGB(0, 0, 255), },
+};
+
+struct _lineArea {
+    QRect rectArea;
+    int lineY[5];
+};
+typedef _lineArea LineArea;
 
 class ScoreReader : public QMainWindow
 {
@@ -59,6 +81,8 @@ private:
     void releaseImage(QImage *image);
     void releaseImage(QPixmap *pixmap);
 
+    void KNN();
+
 private:
     Ui::ScoreReaderClass ui;
 
@@ -74,6 +98,8 @@ private:
     QString m_scoreKey;
     int m_scoreTempo;
 
+    // 오선 영역 리스트
+    QList<LineArea> m_lineAreaList;
 };
 
 #endif // SCOREREADER_H
