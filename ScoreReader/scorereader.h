@@ -35,7 +35,7 @@ static struct sSampleParam {
 
 struct _lineArea {
     QRect rectArea;
-    int lineY[5];
+    QList<int> lineYPosList;
 };
 typedef _lineArea LineArea;
 

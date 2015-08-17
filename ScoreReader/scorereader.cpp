@@ -16,6 +16,8 @@
 #pragma comment(lib, "opencv_ml300.lib")
 #endif
 
+#include <QPainter>
+
 ScoreReader::ScoreReader(QWidget *parent)
     : QMainWindow(parent), m_fileDialog(NULL), m_scoreImage(NULL), m_resultImage(NULL), m_scoreLineImage(NULL)
 {
@@ -69,8 +71,6 @@ ScoreReader::ScoreReader(QWidget *parent)
         cv::Mat outMat = findObjects(resultMat, labeledImage, labeledImageStats);
         releaseImage(m_resultImage);
         m_resultImage = new QImage(cvMatToQImage(outMat));
-
-
 
         setDisplayResultImage(lineMat);
     });
@@ -137,12 +137,8 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
 
     for (int label = 1; label < nLabels; ++label)
     {
-        //int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
-        //int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
         int objTop = outLabelStats.at<int>(label, cv::CC_STAT_TOP);
         cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
-
-        //qDebug() << "Label :" << label << " " << outLabelStats.at<int>(label, cv::CC_STAT_TOP);
 
         // 오선 영역 찾기
         // x : label number, y : distance
@@ -150,9 +146,6 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
 
         for (int x = 1; x < nLabels; x++)
         {
-            if (x == label)
-                continue;
-
             int xTop = outLabelStats.at<int>(x, cv::CC_STAT_TOP);
 
             if (siblingLineCandidates.size() < 5)
@@ -164,6 +157,7 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
                 int indexOfFar = 0;
                 int distance = 0;
 
+                // 형제들 중 제일 멀리있는 형제를 찾아라
                 for (int i = 0; i < siblingLineCandidates.size(); i++)
                 {
                     int itemTop = outLabelStats.at<int>(siblingLineCandidates[i].x(), cv::CC_STAT_TOP);
@@ -175,12 +169,16 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
                     }
                 }
 
+                // 그 형제와 비교하여 그 자리를 차지하라
                 if (distance > abs(objTop - xTop))
                     siblingLineCandidates[indexOfFar] = QPoint(x, abs(objTop - xTop));
             }
         }
 
-        QRect lineArea(inMat.cols, inMat.rows, 0, 0);
+        int lineTop = inMat.rows;
+        int lineLeft = inMat.cols;
+        int lineBottom = 0;
+        int lineRight = 0;
 
         for (auto item : siblingLineCandidates)
         {
@@ -189,24 +187,40 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
             int itemBottom = outLabelStats.at<int>(item.x(), cv::CC_STAT_TOP) + outLabelStats.at<int>(item.x(), cv::CC_STAT_HEIGHT);
             int itemRight = outLabelStats.at<int>(item.x(), cv::CC_STAT_LEFT) + outLabelStats.at<int>(item.x(), cv::CC_STAT_WIDTH);
 
-            if (lineArea.top() > itemTop)
-                lineArea.setTop(itemTop);
+            if (lineTop > itemTop)
+                lineTop = itemTop;
 
-            if (lineArea.left() > itemLeft)
-                lineArea.setLeft(itemLeft);
+            if (lineLeft > itemLeft)
+                lineLeft = itemLeft;
 
-            if (lineArea.right() > itemRight)
-                lineArea.setRight(itemRight);
+            if (lineRight < itemRight)
+                lineRight = itemRight;
 
-            if (lineArea.bottom() > itemBottom)
-                lineArea.setBottom(itemBottom);
+            if (lineBottom < itemBottom)
+                lineBottom = itemBottom;
         }
 
-        // TODO Top 위치가 이상하게 나옴
-        qDebug() << "Label : " << label << lineArea.top() << lineArea.left() << lineArea.bottom() << lineArea.right();
+        qDebug() << "Label : " << label << lineTop << lineLeft << lineBottom << lineRight;
+
+        // 오선 영역 저장
+        LineArea area;
+        area.rectArea = QRect(lineLeft, lineTop, lineRight - lineLeft, lineBottom - lineTop);
 
         // 1, 2, 3, 4, 5 번째 줄의 y 위치 찾기
+        for (int i = 0; i < 5; i++)
+            area.lineYPosList.append(outLabelStats.at<int>(siblingLineCandidates[i].x(), cv::CC_STAT_TOP));
+
+        qSort(area.lineYPosList);
+
+        m_lineAreaList.append(area);
     }
+
+    // 중복된 오선 영역 및 오선 각 선의 Top 위치들을 제거
+    // TODO 뭔가 깔끔하지 못한 방법 같음
+    QList<LineArea>::iterator it = std::unique(m_lineAreaList.begin(), m_lineAreaList.end(), [](const LineArea &first, const LineArea &second){
+        return first.rectArea == second.rectArea;
+    });
+    m_lineAreaList.erase(it, m_lineAreaList.end());
 
     return horizontal;
 }
