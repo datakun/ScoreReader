@@ -70,6 +70,8 @@ private:
     // @param outLabelStats destination labeled image statistics
     cv::Mat findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
 
+    cv::Mat findNotes(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
+
     // 가로선 제거된 이미지에서 마디 찾기
     void findBar(cv::Mat inMat);
 

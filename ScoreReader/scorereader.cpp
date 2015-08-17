@@ -72,7 +72,7 @@ ScoreReader::ScoreReader(QWidget *parent)
         releaseImage(m_resultImage);
         m_resultImage = new QImage(cvMatToQImage(outMat));
 
-        setDisplayResultImage(lineMat);
+        setDisplayResultImage(outMat);
     });
 }
 
@@ -200,7 +200,7 @@ cv::Mat ScoreReader::findLines(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat out
                 lineBottom = itemBottom;
         }
 
-        qDebug() << "Label : " << label << lineTop << lineLeft << lineBottom << lineRight;
+        //qDebug() << "Label : " << label << lineTop << lineLeft << lineBottom << lineRight;
 
         // 오선 영역 저장
         LineArea area;
@@ -257,20 +257,98 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
     cv::Mat centroids;
     connectedComponentsWithStats(inMat, outLabeledMat, outLabelStats, centroids, 8);
 
-    for (int i = 0; i < outLabeledMat.rows; ++i)
+    uchar *grayColors = new uchar[nLabels];
+    grayColors[0] = 0; // 배경색
+
+    for (int label = 1; label < nLabels; ++label)
     {
-        for (int j = 0; j < outLabeledMat.cols; ++j)
+        int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+        int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+        int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+
+        cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
+
+        // 객체가 너무 작거나, 가로가 너무 길거나, 오선 영역을 너무 벗어나면(위 아래 1.5배 영역) 잡음으로 인식
+        if (objArea <= NOISE_SIZE || objWidth > objHeight * 2)
+        {
+            grayColors[label] = 0;
+
+            continue;
+        }
+
+        int flag = 0;
+        for (flag = 0; flag < m_lineAreaList.size(); flag++)
+        {
+            int left = m_lineAreaList[flag].rectArea.left();
+            int top = m_lineAreaList[flag].rectArea.top() - (m_lineAreaList[flag].rectArea.height() / 2);
+            if (top < 0) top = 0;
+            int right = m_lineAreaList[flag].rectArea.right();
+            int bottom = m_lineAreaList[flag].rectArea.bottom() + (m_lineAreaList[flag].rectArea.height() / 2);
+            if (bottom >= inMat.cols) bottom = inMat.cols - 1;
+
+            QRect widedLineArea(left, top, right - left, bottom - top);
+
+            if (widedLineArea.contains(objCenter.x, objCenter.y))
+                break;
+        }
+
+        if (flag == m_lineAreaList.size())
+            grayColors[label] = 0;
+        else
+            grayColors[label] = 255;
+    }
+
+    for (int i = 0; i < inMat.rows; ++i)
+    {
+        for (int j = 0; j < inMat.cols; ++j)
         {
             int label = outLabeledMat.at<int>(i, j);
-
-            int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
-            int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
-            int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
-
-            if (objArea <= NOISE_SIZE || objWidth > objHeight * 2)
-                inMat.at<uchar>(i, j) = 0;
+            
+            uchar &pixel = inMat.at<uchar>(i, j);
+            pixel = grayColors[label];
         }
     }
+
+    // TODO 라벨 정보를 이용하여 color 값을 정하는 것도 좋을 듯
+    //for (int i = 0; i < outLabeledMat.rows; ++i)
+    //{
+    //    for (int j = 0; j < outLabeledMat.cols; ++j)
+    //    {
+    //        int label = outLabeledMat.at<int>(i, j);
+
+    //        int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+    //        int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+    //        int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+
+    //        // 객체가 너무 작거나, 가로가 너무 길거나, 오선 영역을 너무 벗어나면 잡음으로 인식
+    //        if (objArea <= NOISE_SIZE || objWidth > objHeight * 2)
+    //        {
+    //            inMat.at<uchar>(i, j) = 0;
+
+    //            continue;
+    //        }
+
+    //        cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
+    //        for (auto item : m_lineAreaList)
+    //        {
+    //            int left = item.rectArea.left();
+    //            int top = item.rectArea.top() - item.rectArea.height();
+    //            if (top < 0) top = 0;
+    //            int right = item.rectArea.right();
+    //            int bottom = item.rectArea.bottom() + item.rectArea.height();
+    //            if (bottom >= inMat.cols) bottom = inMat.cols - 1;
+
+    //            QRect widedLineArea(left, top, right - left, bottom - top);
+
+    //            if (widedLineArea.contains(objCenter.x, objCenter.y) == false)
+    //            {
+    //                inMat.at<uchar>(i, j) = 0;
+
+    //                break;
+    //            }
+    //        }
+    //    }
+    //}
 
     // 잡음이 제거 된 영상에서 다시 라벨링
     nLabels = connectedComponents(inMat, outLabeledMat, 8);
@@ -281,7 +359,13 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
     colors[0] = cv::Vec3b(0, 0, 0); // 배경색
 
     for (int label = 1; label < nLabels; ++label)
+    {
         colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
+
+        cv::Point objCenter = cv::Point(centroids.at<double>(label, 0), centroids.at<double>(label, 1));
+
+        qDebug() << "Point : " << objCenter.x << objCenter.y;
+    }
 
     cv::Mat outMat(inMat.size(), CV_8UC3);
     for (int i = 0; i < outMat.rows; ++i)
@@ -293,6 +377,55 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
             pixel = colors[label];
         }
     }
+
+    bitwise_not(inMat, inMat);
+
+    return outMat;
+}
+
+cv::Mat ScoreReader::findNotes(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats)
+{
+    //bitwise_not(inMat, inMat);
+
+    //for (int i = 0; i < outLabeledMat.rows; ++i)
+    //{
+    //    for (int j = 0; j < outLabeledMat.cols; ++j)
+    //    {
+    //        int label = outLabeledMat.at<int>(i, j);
+
+    //        int objWidth = outLabelStats.at<int>(label, cv::CC_STAT_WIDTH);
+    //        int objHeight = outLabelStats.at<int>(label, cv::CC_STAT_HEIGHT);
+    //        int objArea = outLabelStats.at<int>(label, cv::CC_STAT_AREA);
+
+    //        if (objArea <= NOISE_SIZE || objWidth > objHeight * 2)
+    //            inMat.at<uchar>(i, j) = 0;
+    //    }
+    //}
+
+    //// 잡음이 제거 된 영상에서 다시 라벨링
+    //int nLabels = connectedComponents(inMat, outLabeledMat, 8);
+    //outLabelStats.create(cv::Size(cv::CC_STAT_MAX, nLabels), cv::DataType<int>::type);
+    //cv::Mat centroids;
+    //connectedComponentsWithStats(inMat, outLabeledMat, outLabelStats, centroids, 8);
+
+    //cv::Vec3b *colors = new cv::Vec3b[nLabels];
+    //colors[0] = cv::Vec3b(0, 0, 0); // 배경색
+
+    //for (int label = 1; label < nLabels; ++label)
+    //    colors[label] = cv::Vec3b((rand() & 255), (rand() & 255), (rand() & 255));
+
+    cv::Mat outMat(inMat.size(), CV_8UC3);
+    //for (int i = 0; i < outMat.rows; ++i)
+    //{
+    //    for (int j = 0; j < outMat.cols; ++j)
+    //    {
+    //        int label = outLabeledMat.at<int>(i, j);
+    //        cv::Vec3b &pixel = outMat.at<cv::Vec3b>(i, j);
+    //        pixel = colors[label];
+    //    }
+    //}
+
+    //bitwise_not(inMat, inMat);
 
     return outMat;
 }
