@@ -46,8 +46,10 @@ ScoreReader::ScoreReader(QWidget *parent)
         if (srcMat.empty())
             return;
 
-        cv::cvtColor(srcMat, srcMat, CV_BGR2GRAY);
-        cv::threshold(srcMat, srcMat, 128, 255, CV_THRESH_BINARY_INV);
+        cv::Mat srcCopyMat;
+
+        cv::cvtColor(srcMat, srcCopyMat, CV_BGR2GRAY);
+        cv::threshold(srcCopyMat, srcCopyMat, 128, 255, CV_THRESH_BINARY_INV);
 
         //// 세선화
         //thinning(resultMat);
@@ -60,19 +62,21 @@ ScoreReader::ScoreReader(QWidget *parent)
         // 오선 찾은 뒤 지우기
         cv::Mat labeledLine;
         cv::Mat labeledLineStats;
-        cv::Mat lineMat = findLines(srcMat, labeledLine, labeledLineStats);
+        cv::Mat lineMat = findLines(srcCopyMat, labeledLine, labeledLineStats);
         releaseImage(m_scoreLineImage);
         m_scoreLineImage = new QImage(cvMatToQImage(lineMat));
-        cv::Mat resultMat = removeLines(srcMat, lineMat);
+        cv::Mat removedLineMat = removeLines(srcCopyMat, lineMat);
 
         // 오선 지워진 영상에서 객체 라벨링
         cv::Mat labeledImage;
         cv::Mat labeledImageStats;
-        cv::Mat outMat = findObjects(resultMat, labeledImage, labeledImageStats);
-        releaseImage(m_resultImage);
-        m_resultImage = new QImage(cvMatToQImage(outMat));
+        cv::Mat circleCandidateMat = findObjects(removedLineMat, labeledImage, labeledImageStats);
 
-        setDisplayResultImage(outMat);
+        cv::Mat circleMat = findCircles(removedLineMat);
+
+        releaseImage(m_resultImage);
+        m_resultImage = new QImage(cvMatToQImage(circleMat));
+        setDisplayResultImage(circleMat);
     });
 }
 
@@ -229,7 +233,12 @@ cv::Mat ScoreReader::removeLines(cv::Mat inMat, cv::Mat lineMat)
 {
     cv::absdiff(inMat, lineMat, inMat);
 
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 2));
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(2, 1));
+
+    cv::erode(inMat, inMat, kernel, cv::Point(-1, -1));
+    cv::dilate(inMat, inMat, kernel, cv::Point(-1, -1));
+
+    kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 2));
 
     cv::dilate(inMat, inMat, kernel, cv::Point(-1, -1));
     cv::erode(inMat, inMat, kernel, cv::Point(-1, -1));
@@ -381,6 +390,19 @@ cv::Mat ScoreReader::findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat o
     bitwise_not(inMat, inMat);
 
     return outMat;
+}
+
+cv::Mat ScoreReader::findCircles(cv::Mat inMat)
+{
+    cv::Mat srcClone(inMat.clone());
+
+    bitwise_not(srcClone, srcClone);
+
+
+
+    bitwise_not(srcClone, srcClone);
+
+    return srcClone;
 }
 
 cv::Mat ScoreReader::findNotes(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats)

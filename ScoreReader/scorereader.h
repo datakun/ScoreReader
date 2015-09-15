@@ -11,6 +11,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "opencv2/imgproc.hpp"
 
 #include "LineFinder.h"
 
@@ -69,6 +70,8 @@ private:
     // @param outLabeledMat destination labeled image
     // @param outLabelStats destination labeled image statistics
     cv::Mat findObjects(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
+
+    cv::Mat findCircles(cv::Mat inMat);
 
     cv::Mat findNotes(cv::Mat inMat, cv::Mat outLabeledMat, cv::Mat outLabelStats);
 
